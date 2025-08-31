@@ -1,17 +1,24 @@
-# FastAPI Template
+# AI Meeting Summarizer API
 
-A production-ready FastAPI template with authentication, async database operations, and Docker support.
+A production-ready FastAPI service that ingests audio files for analysis, built on a template with authentication, async database operations, and Docker support.
 
 ## Features
 
-- **Modern Python**: Type hints, async/await syntax, and the latest FastAPI features
-- **JWT Authentication**: Complete authentication system with access and refresh tokens
-- **SQLAlchemy with Async**: Fully async database operations using SQLAlchemy 2.0+
-- **Alembic Migrations**: Database schema migrations with Alembic
-- **Role-based Access Control**: User roles with different permission levels (active, staff, superuser)
-- **Docker Support**: Ready-to-use Docker and Docker Compose configurations
-- **Developer-friendly**: Auto-reload, debugging, and development tools
-- **Production-ready**: Configuration for deployment in production environments
+### Application Features
+-   **AI-Powered Summarization**: Uses Groq and Llama 3 to generate summaries, topics, decisions, and action items.
+-   **Speaker Diarization**: Leverages Pyannote.audio to distinguish between speakers.
+-   **Accurate Transcription**: Utilizes OpenAI's Whisper for high-quality speech-to-text.
+-   **PDF & Markdown Reports**: Generates and serves reports in multiple formats via the API.
+
+### Platform Features
+-   **Modern Python**: Type hints, async/await syntax, and the latest FastAPI features.
+-   **JWT Authentication**: Complete authentication system with access and refresh tokens.
+-   **SQLAlchemy with Async**: Fully async database operations using SQLAlchemy 2.0+.
+-   **Alembic Migrations**: Database schema migrations with Alembic.
+-   **Role-based Access Control**: User roles with different permission levels (active, staff, superuser).
+-   **Docker Support**: Ready-to-use Docker and Docker Compose configurations.
+-   **Developer-friendly**: Auto-reload, debugging, and development tools.
+-   **Production-ready**: Configuration for deployment in production environments.
 
 ## Project Structure
 
@@ -24,12 +31,12 @@ A production-ready FastAPI template with authentication, async database operatio
 │   ├── db/                  # Database session and base
 │   ├── models/              # SQLAlchemy models
 │   ├── schemas/             # Pydantic schemas
-│   ├── services/            # Business logic
+│   ├── services/            # Business logic (analyzer, summarizer)
 │   └── utils/               # Utility functions
 ├── docker-compose.yml       # Docker Compose for production
 ├── docker-compose.dev.yml   # Docker Compose for development
 ├── Dockerfile               # Docker configuration
-├── alambic.ini              # Alembic configuration
+├── alembic.ini              # Alembic configuration
 ├── main.py                  # Application entry point
 ├── pyproject.toml           # Project dependencies and metadata
 ├── start.sh                 # Production startup script
@@ -50,8 +57,9 @@ A production-ready FastAPI template with authentication, async database operatio
    git clone <your-repo-url>
    cd fastapi-template
    ```
+2. Create a `.env` file from the example in the "Local Development" section below and fill in your details, especially the required API keys.
 
-2. Start the application with Docker Compose:
+3. Start the application with Docker Compose:
    ```bash
    # For development
    docker-compose -f docker-compose.dev.yml up --build
@@ -60,7 +68,7 @@ A production-ready FastAPI template with authentication, async database operatio
    docker-compose up --build
    ```
 
-3. The API will be available at http://localhost:8000
+4. The API will be available at http://localhost:8000
 
 ### Local Development
 
@@ -76,8 +84,12 @@ A production-ready FastAPI template with authentication, async database operatio
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
-3. Install dependencies:
+3. Install dependencies. **Ensure your `pyproject.toml` or `requirements.txt` includes the new AI/ML packages.**
    ```bash
+   # Key new dependencies to add:
+   # openai-whisper, pyannote.audio==2.1.1, groq, reportlab, torch,
+   # huggingface_hub<0.23,>=0.22.2
+
    pip install -e ".[dev]"
    ```
 
@@ -92,7 +104,12 @@ A production-ready FastAPI template with authentication, async database operatio
    # DB_HOST=localhost
    # DB_PORT=5432
    # DB_NAME=app
+
+   # --- Required API Keys for AI Features ---
+   GROQ_API_KEY="gsk_xxxxxxxxxxxxxxxxxxxxxxxxxx"
+   HUGGINGFACE_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxxxxxxx"
    ```
+   **IMPORTANT**: For speaker diarization to work, you must accept the user conditions for the [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0) and [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) models on Hugging Face.
 
 5. Run migrations:
    ```bash
@@ -123,6 +140,15 @@ Once the application is running, you can access:
 - `POST /auth/logout` - Logout user
 - `GET /auth/me` - Get current user information
 
+### Reports & Analysis
+
+-   `POST /reports/upload` - Upload an audio file to start analysis.
+-   `GET /reports` - Retrieve a list of all reports for the user.
+-   `GET /reports/{report_id}` - Fetch a specific report by its ID.
+-   `GET /reports/{report_id}/pdf` - Download the PDF version of a report.
+-   `GET /reports/{report_id}/md` - Download the Markdown version of a report.
+-   `DELETE /reports/{report_id}` - Delete a specific report.
+
 ### System
 
 - `GET /health` - Health check endpoint
@@ -145,6 +171,8 @@ The application is configured through environment variables which can be set in 
 | `DB_HOST` | Database host | `""` |
 | `DB_PORT` | Database port | `""` |
 | `DB_NAME` | Database name | `app.db` |
+| `GROQ_API_KEY` | API Key for Groq Cloud for summarization | `None` |
+| `HUGGINGFACE_TOKEN` | Token for Hugging Face for diarization | `None` |
 
 ## Development
 
