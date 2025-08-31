@@ -1,9 +1,8 @@
 from typing import Dict
 import os
-from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from datetime import datetime
 
 class ReportGenerator:
@@ -12,23 +11,30 @@ class ReportGenerator:
         Generate both PDF and Markdown reports from the meeting data.
         Returns tuple of (pdf_path, markdown_path)
         """
+        # 🔹 Normalize keys so summarizer & report generator stay compatible
+        normalized_summary = {
+            "overview": summary_data.get("executive_summary", ""),
+            "topics": summary_data.get("topics_discussed", []),
+            "decisions": summary_data.get("key_decisions", []),
+            "action_items": summary_data.get("action_items", []),
+            "follow_up": summary_data.get("follow_up_items", []),
+        }
+
         # Create unique filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         base_filename = f"meeting_report_{timestamp}"
-        
+
         pdf_path = os.path.join(output_dir, f"{base_filename}.pdf")
         md_path = os.path.join(output_dir, f"{base_filename}.md")
-        
-        # Generate both formats
-        self._generate_pdf(meeting_data, summary_data, pdf_path)
-        self._generate_markdown(meeting_data, summary_data, md_path)
-        
+
+        # Generate both formats using normalized data
+        self._generate_pdf(meeting_data, normalized_summary, pdf_path)
+        self._generate_markdown(meeting_data, normalized_summary, md_path)
+
         return pdf_path, md_path
 
     def _generate_pdf(self, meeting_data: Dict, summary_data: Dict, output_path: str):
-        """
-        Generate a well-formatted PDF report.
-        """
+        """Generate a well-formatted PDF report."""
         doc = SimpleDocTemplate(output_path, pagesize=letter)
         styles = getSampleStyleSheet()
         story = []
@@ -81,16 +87,14 @@ class ReportGenerator:
         # Full Transcript
         story.append(Paragraph("Full Transcript", styles['SectionHeader']))
         for segment in meeting_data['segments']:
-            speaker_text = f"{segment['speaker']}: {segment['text']}"
+            speaker_text = f"<b>{segment['speaker']}:</b> {segment['text']}"
             story.append(Paragraph(speaker_text, styles['Normal']))
             story.append(Spacer(1, 6))
 
         doc.build(story)
 
     def _generate_markdown(self, meeting_data: Dict, summary_data: Dict, output_path: str):
-        """
-        Generate a markdown version of the report.
-        """
+        """Generate a markdown version of the report."""
         md_content = [
             "# Meeting Report\n",
             f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}  ",

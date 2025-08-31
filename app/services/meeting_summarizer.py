@@ -1,5 +1,8 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 import logging
+from datetime import datetime
+import json
+
 from groq import Groq
 import os
 from pyannote.audio import Model
@@ -19,14 +22,14 @@ class MeetingSummarizer:
         # Initialize speech analysis models
         self.huggingface_token = huggingface_token or os.environ.get("HUGGINGFACE_TOKEN")
         try:
-            self.segmentation_model = Model.from_pretrained("pyannote/segmentation", 
+            self.segmentation_model = Model.from_pretrained("pyannote/segmentation",
                                                           use_auth_token=self.huggingface_token)
             
             # Initialize pipelines with default parameters
             self.vad_pipeline = VoiceActivityDetection(segmentation=self.segmentation_model)
             self.osd_pipeline = OverlappedSpeechDetection(segmentation=self.segmentation_model)
             self.resegmentation_pipeline = Resegmentation(segmentation=self.segmentation_model,
-                                                        diarization="baseline")
+                                                         diarization="baseline")
             
             # Set default hyper-parameters
             self.HYPER_PARAMETERS = {
@@ -96,13 +99,17 @@ class MeetingSummarizer:
                 messages=[
                     {
                         "role": "system",
-                        "content": """You are a professional meeting summarizer. 
-                        Analyze the meeting transcript and provide a clear, structured summary including:
-                        1. Main points and overview
-                        2. Key topics discussed
-                        3. All decisions made
-                        4. Action items with assigned responsibilities
-                        5. Follow-up items and deadlines"""
+                        "content": """You are a professional meeting summarizer with expertise in extracting key insights, 
+                        decisions, and action items from business meetings. Your summaries are always structured, 
+                        comprehensive, and actionable. You pay special attention to:
+                        
+                        1. Identifying the core purpose and outcomes of the meeting
+                        2. Extracting specific decisions with clear ownership
+                        3. Documenting action items with assignees and deadlines
+                        4. Noting important context and rationale for decisions
+                        5. Highlighting risks, dependencies, and follow-up requirements
+                        
+                        Format your response using clear section headers and bullet points for easy parsing."""
                     },
                     {
                         "role": "user",
@@ -110,20 +117,29 @@ class MeetingSummarizer:
                     }
                 ],
                 model="llama-3.3-70b-versatile",
-                temperature=0.7,
-                max_tokens=4000
+                temperature=0.3,  # Lower temperature for more consistent formatting
+                max_tokens=5000,
+                response_format={"type": "json_object"}  # Request JSON output for better structure
             )
 
             # Extract and structure the response
             response = chat_completion.choices[0].message.content
-            return self._structure_response(response)
+            
+            # Parse JSON response or fall back to text parsing
+            try:
+                structured_response = json.loads(response)
+                return self._enhance_summary_with_metadata(structured_response, meeting_data)
+            except json.JSONDecodeError:
+                logger.warning("LLM response not in JSON format, falling back to text parsing")
+                return self._structure_response(response)
+                
         except Exception as e:
             logger.error(f"Error in summary generation: {str(e)}")
             raise
 
     def _create_summary_prompt(self, meeting_data: Dict) -> str:
         """
-        Create a detailed prompt for the meeting summary.
+        Create a detailed prompt for the meeting summary with enhanced context.
         """
         segments = meeting_data["segments"]
         speakers_text = []
@@ -133,54 +149,162 @@ class MeetingSummarizer:
         
         transcript = "\n".join(speakers_text)
         
-        return f"""Please analyze this meeting transcript and provide a structured summary.
-        The meeting was conducted in {meeting_data['language']}.
+        # Extract meeting metadata for better context
+        meeting_title = meeting_data.get("title", "Unknown Meeting")
+        meeting_date = meeting_data.get("date", datetime.now().strftime("%Y-%m-%d"))
+        participants = meeting_data.get("participants", [])
+        
+        return f"""MEETING SUMMARY REQUEST
 
-        Transcript:
-        {transcript}
+Meeting Title: {meeting_title}
+Date: {meeting_date}
+Participants: {', '.join(participants) if participants else 'Not specified'}
+Language: {meeting_data.get('language', 'Unknown')}
 
-        Please provide:
-        1. A concise summary of the main points
-        2. Key topics discussed (bullet points)
-        3. All decisions made during the meeting (bullet points)
-        4. Action items with assigned responsibilities (bullet points)
-        5. Follow-up items and deadlines (if any)"""
+TRANSCRIPT:
+{transcript}
+
+ANALYSIS REQUEST:
+
+Please provide a comprehensive, structured summary in JSON format with the following sections:
+
+1. "executive_summary": A concise overview of the meeting's purpose and key outcomes (2-3 paragraphs)
+2. "key_decisions": List of decisions made with:
+   - Decision description
+   - Decision maker/owner
+   - Rationale/context
+   - Implementation timeline if available
+3. "action_items": Specific tasks with:
+   - Task description
+   - Assignee(s)
+   - Deadline (if specified)
+   - Dependencies/constraints
+4. "topics_discussed": Main discussion points with key insights
+5. "follow_up_items": Items requiring further investigation or future discussion
+6. "risks_issues": Any risks, concerns, or unresolved issues identified
+7. "next_steps": Recommended actions and timeline for follow-up
+
+Please ensure:
+- Use clear, actionable language
+- Extract specific names, dates, and commitments from the transcript
+- Maintain neutral, professional tone
+- Focus on business value and clarity
+- Format all dates consistently (YYYY-MM-DD)
+- Return ONLY valid JSON without any additional text"""
 
     def _structure_response(self, response: str) -> Dict:
         """
-        Structure the LLM response into organized sections.
+        Structure the LLM response into organized sections with enhanced parsing.
         """
-        sections = response.split("\n\n")
-        structured_summary = {
-            "overview": "",
-            "topics": [],
-            "decisions": [],
+        # Enhanced parsing for text responses
+        sections = {
+            "executive_summary": "",
+            "key_decisions": [],
             "action_items": [],
-            "follow_up": []
+            "topics_discussed": [],
+            "follow_up_items": [],
+            "risks_issues": [],
+            "next_steps": []
         }
-
+        
+        # Try to parse section headers more intelligently
+        lines = response.split('\n')
         current_section = None
-        for section in sections:
-            section = section.strip()
-            if not section:
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
                 continue
                 
-            if "main points" in section.lower() or "summary" in section.lower():
-                current_section = "overview"
-                structured_summary["overview"] = section
-            elif "topics" in section.lower():
-                current_section = "topics"
-            elif "decision" in section.lower():
-                current_section = "decisions"
-            elif "action" in section.lower():
+            # Detect section headers
+            lower_line = line.lower()
+            if "executive" in lower_line or "summary" in lower_line:
+                current_section = "executive_summary"
+            elif "decision" in lower_line:
+                current_section = "key_decisions"
+            elif "action" in lower_line and "item" in lower_line:
                 current_section = "action_items"
-            elif "follow" in section.lower():
-                current_section = "follow_up"
-            elif current_section and current_section != "overview":
-                # Clean up bullet points and add to appropriate section
-                items = [item.strip().strip('•').strip('-').strip() 
-                        for item in section.split('\n') 
-                        if item.strip()]
-                structured_summary[current_section].extend(items)
+            elif "topic" in lower_line or "discuss" in lower_line:
+                current_section = "topics_discussed"
+            elif "follow" in lower_line or "future" in lower_line:
+                current_section = "follow_up_items"
+            elif "risk" in lower_line or "issue" in lower_line:
+                current_section = "risks_issues"
+            elif "next" in lower_line or "step" in lower_line:
+                current_section = "next_steps"
+            elif current_section:
+                # Clean and add content to current section
+                if current_section == "executive_summary":
+                    sections[current_section] += line + " "
+                else:
+                    # Handle bullet points and list items
+                    if line.startswith(('•', '-', '*')) or line[0].isdigit():
+                        clean_item = line.lstrip('•-* ').lstrip('0123456789.) ')
+                        if clean_item and len(clean_item) > 3:  # Minimum meaningful length
+                            sections[current_section].append(clean_item)
+        
+        # Clean up executive summary
+        sections["executive_summary"] = sections["executive_summary"].strip()
+        
+        return self._enhance_summary_with_metadata(sections, {})
 
-        return structured_summary
+    def _enhance_summary_with_metadata(self, summary: Dict, meeting_data: Dict) -> Dict:
+        """
+        Add metadata and quality checks to the summary.
+        """
+        enhanced_summary = {
+            "metadata": {
+                "generation_date": datetime.now().isoformat(),
+                "model_used": "llama-3.3-70b-versatile",
+                "meeting_title": meeting_data.get("title", ""),
+                "meeting_date": meeting_data.get("date", ""),
+                "participants": meeting_data.get("participants", []),
+                "language": meeting_data.get("language", "")
+            },
+            "summary": summary,
+            "quality_metrics": {
+                "decision_count": len(summary.get("key_decisions", [])),
+                "action_item_count": len(summary.get("action_items", [])),
+                "has_deadlines": any("deadline" in str(item).lower() for item in summary.get("action_items", [])),
+                "has_assignees": any("assignee" in str(item).lower() for item in summary.get("action_items", []))
+            }
+        }
+        
+        return enhanced_summary
+
+    def generate_detailed_report(self, meeting_data: Dict, audio_analysis: Dict = None) -> Dict:
+        """
+        Generate a comprehensive report including summary and audio insights.
+        """
+        summary = self.generate_summary(meeting_data)
+        
+        report = {
+            "meeting_report": summary,
+            "audio_analysis": audio_analysis or {},
+            "transcript_metrics": {
+                "total_segments": len(meeting_data.get("segments", [])),
+                "total_speakers": len(set(segment.get("speaker", "") for segment in meeting_data.get("segments", []))),
+                "transcript_length": sum(len(segment.get("text", "")) for segment in meeting_data.get("segments", []))
+            }
+        }
+        
+        # Add audio insights if available
+        if audio_analysis:
+            report["audio_insights"] = self._extract_audio_insights(audio_analysis)
+        
+        return report
+
+    def _extract_audio_insights(self, audio_analysis: Dict) -> Dict:
+        """
+        Extract meaningful insights from audio analysis data.
+        """
+        insights = {
+            "speaking_time_analysis": "Not available",
+            "overlap_analysis": "Not available",
+            "conversation_flow": "Not available"
+        }
+        
+        # Add actual analysis extraction logic here based on audio_analysis content
+        # This would parse the pyannote output to provide meaningful metrics
+        
+        return insights
