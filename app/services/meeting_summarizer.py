@@ -133,18 +133,39 @@ class MeetingSummarizer:
         
         transcript = "\n".join(speakers_text)
         
-        return f"""Please analyze this meeting transcript and provide a structured summary.
-        The meeting was conducted in {meeting_data['language']}.
+        return f"""You are an assistant specialized in creating professional meeting summaries.
+The following is a transcript of a meeting conducted in {meeting_data['language']}.
 
         Transcript:
         {transcript}
 
-        Please provide:
-        1. A concise summary of the main points
-        2. Key topics discussed (bullet points)
-        3. All decisions made during the meeting (bullet points)
-        4. Action items with assigned responsibilities (bullet points)
-        5. Follow-up items and deadlines (if any)"""
+        Your task:
+Carefully read the transcript and generate a structured meeting summary. 
+Ensure clarity, conciseness, and completeness.
+
+Please include the following sections in your response:
+
+1. **Overall Summary**  
+   - Provide a concise paragraph summarizing the purpose of the meeting and its main outcomes.
+
+2. **Key Topics Discussed**  
+   - List the main topics covered during the meeting (use bullet points).
+
+3. **Decisions Made**  
+   - Clearly list all decisions reached during the meeting (bullet points).
+
+4. **Action Items**  
+   - Provide a list of specific tasks, who is responsible, and any relevant deadlines.  
+   Example: *[Task] → Assigned to [Person], Deadline: [Date]*
+
+5. **Follow-ups / Next Steps**  
+   - Mention any pending discussions, open questions, or future agenda items.
+
+Formatting Guidelines:
+- Use clear headings and bullet points.
+- Keep summaries concise but detailed enough for someone who did not attend the meeting.
+- Do not add information not present in the transcript.
+"""
 
     def _structure_response(self, response: str) -> Dict:
         """
